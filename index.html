@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>MedSim Ventilator</title>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{background:#000;color:#fff;font-family:'Courier New',monospace;overflow:hidden;width:100vw;height:100vh;display:flex;flex-direction:column}
+
+/* ── SETUP ── */
+#setup{position:fixed;inset:0;background:#080808;z-index:500;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:32px}
+#setup h1{font-size:20px;font-weight:800;color:#fff;font-family:-apple-system,sans-serif;letter-spacing:2px}
+#setup p{font-size:13px;color:#666;text-align:center;max-width:320px;line-height:1.9;font-family:-apple-system,sans-serif}
+#si{background:#111;border:2px solid #00e676;border-radius:10px;color:#00ff44;font-size:26px;font-weight:800;letter-spacing:5px;text-align:center;padding:12px 20px;width:100%;max-width:340px;outline:none;text-transform:uppercase;font-family:'Courier New',monospace}
+#sb{background:#00e676;color:#000;border:none;border-radius:10px;padding:14px 0;font-size:16px;font-weight:800;cursor:pointer;width:100%;max-width:340px;font-family:-apple-system,sans-serif}
+#sm{font-size:12px;color:#888;font-family:-apple-system,sans-serif;min-height:20px;text-align:center}
+
+/* ── ALARM BAR ── */
+#abar{height:26px;display:flex;align-items:center;padding:0 12px;gap:8px;background:#111;border-bottom:1px solid #1a1a1a;flex-shrink:0;overflow:hidden}
+#adot{font-size:9px;color:#333}
+#atxt{font-size:10px;font-weight:700;letter-spacing:1.2px;color:#333;white-space:nowrap}
+#abar.crit{background:#380000;border-bottom-color:#550000}
+#abar.warn{background:#261600;border-bottom-color:#3a2000}
+@keyframes bAl{0%,100%{opacity:1}50%{opacity:.1}}
+#abar.crit #adot,#abar.crit #atxt{color:#ff3333;animation:bAl .55s infinite}
+#abar.warn #adot{color:#ffd740;animation:bAl .9s infinite}
+#abar.warn #atxt{color:#ffd740}
+
+/* ── TOP BAR ── */
+#tbar{display:flex;justify-content:space-between;align-items:center;padding:0 12px;background:#080808;border-bottom:1px solid #161616;height:24px;flex-shrink:0}
+#tbar span{font-size:10px;color:#3a3a3a;letter-spacing:1px}
+#vclk{color:#666!important}
+#vrm{color:#00ff44!important;letter-spacing:3px;font-weight:bold}
+#vcn{font-size:10px}
+#vcn.live{color:#00e676}#vcn.off{color:#ff4444}#vcn.try{color:#ffd740}
+
+/* ── BODY ── */
+#body{flex:1;display:flex;min-height:0}
+#left{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+
+/* ── WAVEFORMS ── */
+#waves{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+.wr{flex:1;position:relative;border-bottom:1px solid #0a0a0a;min-height:0;overflow:hidden;background:#000}
+.wr:last-child{border-bottom:none}
+canvas{display:block;position:absolute;inset:0;width:100%;height:100%}
+.wl{position:absolute;top:3px;left:8px;font-size:9px;font-weight:700;letter-spacing:1.5px;pointer-events:none;text-shadow:0 0 5px currentColor;z-index:4}
+.wi{position:absolute;top:3px;right:8px;font-size:9px;opacity:.5;pointer-events:none;z-index:4;font-variant-numeric:tabular-nums}
+.rl{position:absolute;left:0;right:0;height:0;pointer-events:none;z-index:3}
+.rl-s{border-top:1px solid rgba(255,255,255,.14)}
+.rl-d{border-top:1px dashed rgba(255,255,255,.10)}
+.rl-r{border-top:1px dashed rgba(255,80,80,.20)}
+
+/* ── RIGHT COLUMN — nums aligned to waveforms + corner for RR/IE ── */
+#right-col{width:200px;flex-shrink:0;display:flex;flex-direction:column;border-left:2px solid #0e0e0e;background:#030303}
+#nums{flex:1;display:flex;flex-direction:column;min-height:0}
+.nb{flex:1;border-bottom:1px solid #0c0c0c;display:flex;flex-direction:column;justify-content:center;padding:5px 12px;overflow:hidden;min-height:0}
+.nb:last-child{border-bottom:none}
+/* corner: same height as #sbar, holds RR and I:E side by side */
+#corner{flex-shrink:0;height:116px;border-top:2px solid #111;display:flex;background:#040404}
+.cn{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border-right:1px solid #111}
+.cn:last-child{border-right:none}
+.cnl{font-size:9px;font-weight:700;letter-spacing:2px;opacity:.35;text-transform:uppercase}
+.cnv{font-size:38px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-1px}
+.cnu{font-size:9px;opacity:.25}
+.nl{font-size:9px;font-weight:700;letter-spacing:2px;opacity:.4;margin-bottom:2px}
+.nv{font-size:52px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-2px}
+.nv2{font-size:34px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-1px}  /* for PIP/PEEP combined */
+.nu{font-size:8px;opacity:.3;margin-top:2px}
+.nsub{font-size:11px;opacity:.35;margin-top:1px;font-variant-numeric:tabular-nums}  /* secondary value */
+.cco2{color:#ffd740;text-shadow:0 0 12px #ffd74066}
+.cpip{color:#00ff44;text-shadow:0 0 12px #00ff4466}
+.ctv{color:#00cfff;text-shadow:0 0 10px #00cfff55}
+.cmv{color:#ffd740;text-shadow:0 0 10px #ffd74055}
+.crr{color:#8899ff}
+.cie{color:#aaffaa}
+@keyframes bNm{0%,100%{opacity:1}50%{opacity:.1}}
+.nb.al .nv,.nb.al .nv2,.nb.al .nl{animation:bNm .6s infinite;color:#ff3333!important;text-shadow:none!important}
+
+/* ── SETTINGS BAR — bigger text ── */
+#sbar{height:116px;border-top:2px solid #111;display:flex;align-items:center;padding:0 12px;gap:8px;overflow-x:auto;flex-shrink:0;background:#040404;scrollbar-width:none}
+#sbar::-webkit-scrollbar{display:none}
+.sdv{width:1px;background:#1e1e1e;align-self:stretch;margin:14px 0;flex-shrink:0}
+
+/* Mode group */
+.mg{display:flex;flex-direction:column;gap:4px;flex-shrink:0;align-items:center}
+.mgl{font-size:9px;letter-spacing:2px;color:#2a2a2a;text-transform:uppercase;text-align:center}
+.mr{display:flex;gap:4px}
+.mb{border:1px solid #1c1c1c;border-radius:5px;padding:7px 9px;font-size:13px;font-weight:700;cursor:pointer;background:#0a0a0a;color:#3a3a3a;letter-spacing:.5px;font-family:'Courier New',monospace;flex-shrink:0}
+.mb.on{background:#001600;color:#00ff44;border-color:#1e4a1e;text-shadow:0 0 5px #00ff4455}
+.mb:active{filter:brightness(.6)}
+
+/* Param control — bigger */
+.pc{display:flex;flex-direction:column;align-items:center;gap:3px;flex-shrink:0;min-width:64px}
+.pcl{font-size:10px;letter-spacing:1.5px;color:#444;text-transform:uppercase;text-align:center;font-weight:700}
+.pv{font-size:20px;font-weight:700;color:#bbb;text-align:center;min-width:60px;font-variant-numeric:tabular-nums;line-height:1.1}
+.pb{display:flex;gap:3px}
+.pbb{background:#0e0e0e;border:1px solid #222;color:#777;border-radius:4px;width:28px;height:28px;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-weight:900;font-family:sans-serif;flex-shrink:0;line-height:1}
+.pbb:active{background:#252525}
+
+/* Gas controls */
+.gc{display:flex;flex-direction:column;align-items:center;gap:3px;flex-shrink:0;min-width:60px}
+.gcl{font-size:10px;letter-spacing:1px;text-transform:uppercase;text-align:center;font-weight:700}
+.gv{font-size:20px;font-weight:700;text-align:center;min-width:56px;font-variant-numeric:tabular-nums;line-height:1.1}
+.gb{display:flex;gap:3px}
+.gbb{background:#0e0e0e;border:1px solid #222;color:#777;border-radius:4px;width:28px;height:28px;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-weight:900;font-family:sans-serif;flex-shrink:0;line-height:1}
+.gbb:active{background:#252525}
+
+/* Sevo dial — special display */
+.sevo-wrap{display:flex;flex-direction:column;align-items:center;gap:3px;flex-shrink:0;min-width:90px}
+.sevo-label{font-size:10px;letter-spacing:1.5px;color:#cc44cc;text-transform:uppercase;text-align:center;font-weight:700}
+.sevo-dial{font-size:28px;font-weight:700;color:#ee66ff;text-align:center;font-variant-numeric:tabular-nums;text-shadow:0 0 10px #cc44cc66;line-height:1}
+.sevo-actual{font-size:13px;color:#884488;font-variant-numeric:tabular-nums;margin-top:-2px}
+.sevo-mac{font-size:10px;color:#553355;font-variant-numeric:tabular-nums}
+.sevo-btns{display:flex;gap:3px}
+.sbb{background:#0e0e0e;border:1px solid #331133;color:#884488;border-radius:4px;width:28px;height:28px;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-weight:900;font-family:sans-serif;flex-shrink:0;line-height:1}
+.sbb:active{background:#221122}
+.sevo-wrap.on .sevo-dial{color:#ff88ff;text-shadow:0 0 14px #cc44cc}
+.sevo-wrap.on .sbb{border-color:#552255;color:#cc66cc}
+
+/* Manual breath */
+#mbtn{background:#001400;border:2px solid #003300;color:#00cc44;border-radius:6px;padding:6px 12px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;font-family:'Courier New',monospace;letter-spacing:1px;flex-shrink:0;display:none;transition:background .1s}
+#mbtn:active,#mbtn.fire{background:#00cc44;color:#000;border-color:#00ff44}
+
+/* Path label */
+#ptag{font-size:9px;letter-spacing:1px;padding:4px 10px;border-left:2px solid #111;align-self:stretch;display:flex;align-items:center;white-space:nowrap;color:#2a2a2a;flex-shrink:0}
+#ptag.bad{color:#ff9100;border-left-color:#2a1400}
+</style>
+</head>
+<body>
+
+<div id="setup">
+  <div style="font-size:44px">🫁</div>
+  <h1>MedSim Ventilator</h1>
+  <p>Enter the <strong style="color:#fff">Room Code</strong> shown on the monitor.</p>
+  <input id="si" type="text" value="ROOM1" maxlength="12" autocomplete="off" autocorrect="off" spellcheck="false">
+  <button id="sb" onclick="doConnect()">CONNECT TO MONITOR</button>
+  <div id="sm">Open the monitor first, then connect here.</div>
+</div>
+
+<div id="abar"><span id="adot">●</span><span id="atxt">NO ACTIVE ALARMS</span></div>
+
+<div id="tbar">
+  <span>MedSim Vent &nbsp;|&nbsp; Room: <strong id="vrm">----</strong></span>
+  <span id="vclk">--:--:--</span>
+  <span id="vcn" class="off">● OFFLINE</span>
+</div>
+
+<div id="body">
+  <div id="left">
+    <div id="waves">
+
+      <!-- Pressure -->
+      <div class="wr" id="prow">
+        <div class="wl" style="color:#00e676">PRESSURE cmH₂O</div>
+        <div class="wi" id="pi-nfo">PIP -- | PEEP --</div>
+        <canvas id="c-p"></canvas>
+        <div class="rl rl-s" style="bottom:8%"></div>
+        <div class="rl rl-d" id="rl-peep" style="top:80%"></div>
+        <div class="rl rl-r" id="rl-plim" style="top:25%"></div>
+      </div>
+
+      <!-- Flow -->
+      <div class="wr" id="frow">
+        <div class="wl" style="color:#00e676">FLOW L/min</div>
+        <div class="wi" id="fl-nfo">-- L/min</div>
+        <canvas id="c-f"></canvas>
+        <div class="rl rl-s" style="top:50%"></div>
+      </div>
+
+      <!-- Volume -->
+      <div class="wr" id="vrow">
+        <div class="wl" style="color:#00e676">VOLUME mL</div>
+        <div class="wi" id="vl-nfo">TV -- mL</div>
+        <canvas id="c-v"></canvas>
+        <div class="rl rl-s" style="bottom:8%"></div>
+      </div>
+
+      <!-- CO2 capnogram -->
+      <div class="wr" id="crow">
+        <div class="wl" style="color:#ff9100">EtCO₂ CAPNO mmHg</div>
+        <div class="wi" id="co-nfo">-- mmHg</div>
+        <canvas id="c-c"></canvas>
+        <div class="rl rl-s" style="bottom:8%"></div>
+      </div>
+
+    </div><!-- end #waves -->
+
+    <!-- Settings bar — below waveforms only, not under right column -->
+    <div id="sbar">
+      <!-- Mode -->
+      <div class="mg">
+        <div class="mgl">Mode</div>
+        <div class="mr">
+          <button class="mb on" id="mb-VCV"    onclick="setMode('VCV')">VCV</button>
+          <button class="mb"    id="mb-PCV"    onclick="setMode('PCV')">PCV</button>
+          <button class="mb"    id="mb-PSV"    onclick="setMode('PSV')">PSV</button>
+          <button class="mb"    id="mb-SIMV"   onclick="setMode('SIMV')">SIMV</button>
+          <button class="mb"    id="mb-Manual" onclick="setMode('Manual')">MAN</button>
+        </div>
+      </div>
+      <div class="sdv"></div>
+
+      <!-- TV -->
+      <div class="pc">
+        <div class="pcl" style="color:#00cfff">TV</div>
+        <div class="pb"><button class="pbb" onclick="adj('tv',-50)">−</button><button class="pbb" onclick="adj('tv',50)">+</button></div>
+        <div class="pv" style="color:#00cfff" id="sv-tv">450 mL</div>
+      </div>
+      <!-- RR set -->
+      <div class="pc">
+        <div class="pcl" style="color:#8899ff">RR set</div>
+        <div class="pb"><button class="pbb" onclick="adj('rr_set',-1)">−</button><button class="pbb" onclick="adj('rr_set',1)">+</button></div>
+        <div class="pv" style="color:#8899ff" id="sv-rr">14/min</div>
+      </div>
+      <!-- PEEP -->
+      <div class="pc">
+        <div class="pcl" style="color:#44ffaa">PEEP</div>
+        <div class="pb"><button class="pbb" onclick="adj('peep',-1)">−</button><button class="pbb" onclick="adj('peep',1)">+</button></div>
+        <div class="pv" style="color:#44ffaa" id="sv-peep">5</div>
+      </div>
+      <!-- PS — PSV/SIMV -->
+      <div class="pc" id="pc-ps">
+        <div class="pcl" style="color:#aaffaa">P.Supp</div>
+        <div class="pb"><button class="pbb" onclick="adj('ps',-2)">−</button><button class="pbb" onclick="adj('ps',2)">+</button></div>
+        <div class="pv" style="color:#aaffaa" id="sv-ps">10</div>
+      </div>
+      <!-- PC Level — PCV only -->
+      <div class="pc" id="pc-pcl">
+        <div class="pcl" style="color:#00ffcc">PC Level</div>
+        <div class="pb"><button class="pbb" onclick="adj('pcLevel',-2)">−</button><button class="pbb" onclick="adj('pcLevel',2)">+</button></div>
+        <div class="pv" style="color:#00ffcc" id="sv-pcl">15</div>
+      </div>
+      <!-- I:E -->
+      <div class="pc">
+        <div class="pcl" style="color:#8899ff">I:E</div>
+        <div class="pb"><button class="pbb" onclick="adjIE(-1)">−</button><button class="pbb" onclick="adjIE(1)">+</button></div>
+        <div class="pv" style="color:#8899ff" id="sv-ie">1:2.0</div>
+      </div>
+      <!-- APL — Manual only -->
+      <div class="pc" id="pc-apl">
+        <div class="pcl" style="color:#ff9100">APL</div>
+        <div class="pb"><button class="pbb" onclick="adj('apl',-5)">−</button><button class="pbb" onclick="adj('apl',5)">+</button></div>
+        <div class="pv" style="color:#ff9100" id="sv-apl">30</div>
+      </div>
+      <!-- P.Limit -->
+      <div class="pc">
+        <div class="pcl" style="color:#ff4444">P.Limit</div>
+        <div class="pb"><button class="pbb" onclick="adj('pipLimit',-2)">−</button><button class="pbb" onclick="adj('pipLimit',2)">+</button></div>
+        <div class="pv" style="color:#ff4444" id="sv-plim">40</div>
+      </div>
+      <div class="sdv"></div>
+
+      <!-- O2 flow -->
+      <div class="gc">
+        <div class="gcl" style="color:#44aaff">O₂ Flow</div>
+        <div class="gb"><button class="gbb" onclick="adjGas('o2',-0.5)">−</button><button class="gbb" onclick="adjGas('o2',0.5)">+</button></div>
+        <div class="gv" style="color:#44aaff" id="sv-o2">2.0 L</div>
+      </div>
+      <!-- Air flow -->
+      <div class="gc">
+        <div class="gcl" style="color:#88aacc">Air Flow</div>
+        <div class="gb"><button class="gbb" onclick="adjGas('air',-0.5)">−</button><button class="gbb" onclick="adjGas('air',0.5)">+</button></div>
+        <div class="gv" style="color:#88aacc" id="sv-air">2.0 L</div>
+      </div>
+      <!-- FGF / FiO2 display -->
+      <div class="gc" style="min-width:52px">
+        <div class="gcl" style="color:#ff9100">FiO₂</div>
+        <div class="gv" style="color:#ff9100;font-size:24px" id="sv-fgfio2">50%</div>
+        <div style="font-size:9px;color:#333;text-align:center" id="sv-fgf">FGF 4.0 L</div>
+      </div>
+      <div class="sdv"></div>
+
+      <!-- Sevoflurane -->
+      <div class="sevo-wrap" id="sevo-wrap">
+        <div class="sevo-label">Sevoflurane</div>
+        <div class="sevo-dial" id="sv-sevo-dial">0.0%</div>
+        <div class="sevo-actual" id="sv-sevo-actual">↳ del: 0.0%</div>
+        <div class="sevo-mac" id="sv-sevo-mac">0.0 MAC</div>
+        <div class="sevo-btns">
+          <button class="sbb" onclick="adjSevo(-0.5)">−</button>
+          <button class="sbb" onclick="adjSevo(0.5)">+</button>
+        </div>
+      </div>
+      <div class="sdv"></div>
+
+      <!-- Manual breath button -->
+      <button id="mbtn" onclick="doManualBreath()">▶ MANUAL BREATH</button>
+
+      <!-- Path label -->
+      <div id="ptag">NORMAL</div>
+    </div><!-- end #sbar -->
+
+  </div><!-- end #left -->
+
+  <!-- Right column: 4 numeric rows aligned to waveforms, then corner for RR/I:E -->
+  <div id="right-col">
+    <div id="nums">
+      <!-- Row 1 → Pressure: PIP/PEEP -->
+      <div class="nb cpip" id="nb-pip">
+        <div class="nl">PIP / PEEP</div>
+        <div style="display:flex;align-items:baseline;gap:4px;flex-wrap:wrap">
+          <span class="nv2" id="nv-pip">--</span>
+          <span style="font-size:16px;opacity:.3">/</span>
+          <span class="nv2" id="nv-pep" style="color:#44ffaa;text-shadow:0 0 10px #44ffaa44">--</span>
+        </div>
+        <div class="nu">cmH₂O</div>
+      </div>
+      <!-- Row 2 → Flow: MV -->
+      <div class="nb cmv" id="nb-mv">
+        <div class="nl">MV</div>
+        <div class="nv" id="nv-mv">--</div>
+        <div class="nu">L/min</div>
+      </div>
+      <!-- Row 3 → Volume: TV actual (large) + set (sub) -->
+      <div class="nb ctv" id="nb-tv">
+        <div class="nl">TV ACT</div>
+        <div style="display:flex;align-items:baseline;gap:6px">
+          <div class="nv" id="nv-tv" style="font-size:42px">--</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:5px;margin-top:2px">
+          <span style="font-size:8px;opacity:.35;letter-spacing:1px">SET</span>
+          <span style="font-size:11px;color:#00cfff;opacity:.5" id="nv-tv-set">--</span>
+        </div>
+        <div class="nu">mL</div>
+      </div>
+      <!-- Row 4 → CO2: EtCO2 -->
+      <div class="nb cco2" id="nb-co2">
+        <div class="nl">EtCO₂</div>
+        <div class="nv" id="nv-co2">--</div>
+        <div class="nu">mmHg</div>
+      </div>
+    </div><!-- end #nums -->
+
+    <!-- Corner: RR and I:E, sits flush with #sbar height -->
+    <div id="corner">
+      <div class="cn crr">
+        <div class="cnl">RR</div>
+        <div class="cnv" id="nv-rr" style="color:#8899ff">--</div>
+        <div class="cnu">/min</div>
+      </div>
+      <div class="cn cie">
+        <div class="cnl">I:E</div>
+        <div class="cnv" id="nv-ie" style="color:#aaffaa;font-size:26px">--</div>
+        <div class="cnu">ratio</div>
+      </div>
+    </div>
+
+  </div><!-- end #right-col -->
+
+</div><!-- end #body -->
+
+<script>
+'use strict';
+var VS={hr:72,sbp:120,dbp:80,spo2:98,rr:14,etco2:35,temp:98.6,rhythm:'NSR',artLine:false,etco2On:true,
+  ventMode:'VCV',tv:450,rr_set:14,peep:5,ps:10,fio2:50,ie:2.0,pipLimit:40,apl:30,
+  compliance:50,resistance:5,ventPath:'normal',flowRate:40,riseTime:25,triggerSens:-2,pcLevel:15};
+
+// ── GAS MIXER STATE ───────────────────────────────────────────────────────────
+var o2Flow=2.0, airFlow=2.0;            // L/min each
+var sevoDial=0.0, sevoActual=0.0;       // %
+var SEVO_MAC=2.05;                      // sevoflurane MAC (adult, %atm)
+var CIRCUIT_VOL=3.0;                    // L (adult breathing circuit)
+
+var ROOM='',peer=null,monConn=null;
+var manualPending=false;  // fire one manual squeeze breath
+var spontPending=false;   // controller-triggered single spont breath
+var hiddenRR=0;           // instructor-set patient spontaneous RR — not shown on monitor
+
+function triggerSpontBreath(){
+  spontPending=true;
+  vphase=0; // restart phase so trigger dip shows immediately
+}
+
+setInterval(function(){document.getElementById('vclk').textContent=new Date().toLocaleTimeString('en-US',{hour12:false});},1000);
+document.getElementById('si').addEventListener('keydown',function(e){if(e.key==='Enter')doConnect();});
+
+function doConnect(){
+  var v=document.getElementById('si').value.trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
+  if(!v){alert('Enter a room code');return;}
+  ROOM=v;
+  document.getElementById('vrm').textContent=ROOM;
+  document.getElementById('sb').disabled=true;
+  document.getElementById('sm').textContent='Connecting...';
+  document.getElementById('sm').style.color='#ffd740';
+  peer=new Peer({debug:0});
+  peer.on('open',function(){
+    monConn=peer.connect('medsim-mon-'+ROOM,{reliable:true});
+    monConn.on('open',function(){
+      document.getElementById('setup').style.display='none';
+      document.getElementById('vcn').textContent='● LIVE';
+      document.getElementById('vcn').className='live';
+      setTimeout(resizeAll,80);
+      requestAnimationFrame(frame);
+    });
+    monConn.on('data',function(msg){
+      if(msg&&msg.type==='state'&&msg.data){VS=Object.assign({},VS,msg.data);updateUI();}
+      if(msg&&msg.type==='spontBreath'){triggerSpontBreath();}
+      if(msg&&msg.type==='spontRR'){hiddenRR=msg.rr||0;} // hidden patient RR — separate from displayed RR
+    });
+    monConn.on('close',function(){document.getElementById('vcn').textContent='● DISCONNECTED';document.getElementById('vcn').className='off';});
+    monConn.on('error',function(){
+      document.getElementById('sm').textContent='Could not reach monitor. Is it open?';
+      document.getElementById('sm').style.color='#ff4444';
+      document.getElementById('sb').disabled=false;
+    });
+  });
+  peer.on('error',function(e){
+    document.getElementById('sm').textContent='Error: '+e.message;
+    document.getElementById('sm').style.color='#ff4444';
+    document.getElementById('sb').disabled=false;
+  });
+}
+
+function send(obj){if(monConn&&monConn.open){try{monConn.send(obj);}catch(e){}}}
+
+// ── VENT PHYSICS ──────────────────────────────────────────────────────────────
+function calcPIP(){
+  var tv_L=(VS.tv||450)/1000,comp=(VS.compliance||50)/1000,res=VS.resistance||5;
+  return Math.round(tv_L/comp+(VS.peep||5)+res*(VS.flowRate||40)/60);
+}
+function calcPplat(){
+  return Math.round((VS.tv||450)/1000/(VS.compliance||50)*1000+(VS.peep||5));
+}
+function calcMV(){
+  var mode=VS.ventMode||'VCV';
+  var r=(mode==='PSV'||mode==='SIMV')?(VS.rr||VS.rr_set||14):(VS.rr_set||14);
+  return ((VS.tv||450)*r/1000).toFixed(1);
+}
+
+// Actual delivered TV — reduced when PIP would exceed pressure limit
+// In VCV: if required PIP > pipLimit, volume delivery is truncated
+// Formula: actualTV = min(setTV, pipLimit-based max TV)
+function calcActualTV(){
+  var mode=VS.ventMode||'VCV';
+  if(mode==='PCV'){
+    // PCV: TV determined by PC level, compliance, resistance — not directly settable
+    var pcL=VS.pcLevel||15, peep=VS.peep||5, comp=(VS.compliance||50)/1000;
+    // TV ≈ PC_level × compliance (simplified, ignoring resistance for display)
+    return Math.round(pcL * comp * 1000 * 0.82); // 0.82 = typical filling fraction
+  }
+  var pip=calcPIP(), limit=VS.pipLimit||40;
+  var setTV=VS.tv||450;
+  if(mode==='Manual'||(mode==='PSV')||mode==='SIMV'){
+    return Math.round(setTV*0.65); // spontaneous tidal volume is ~65% of set
+  }
+  if(pip<=limit) return setTV; // full volume delivered
+  // Pressure-limited: reduce TV proportionally
+  var comp=(VS.compliance||50)/1000, peep=VS.peep||5, res=VS.resistance||5;
+  var maxTV=Math.round((limit - peep - res*(VS.flowRate||40)/60) * comp * 1000);
+  return Math.max(50, Math.min(setTV, maxTV));
+}
+function ss(t){return t<=0?0:t>=1?1:t*t*(3-2*t);}
+
+// ── SEVO WASHOUT ENGINE ───────────────────────────────────────────────────────
+// Called in animation loop with dt (seconds)
+function updateSevo(dt){
+  var fgf=Math.max(0.1, o2Flow+airFlow);                 // L/min
+  var mv=parseFloat(calcMV());                           // L/min
+  // Time constant (seconds) = circuit vol / (FGF + fraction of MV that mixes)
+  // Higher FGF → faster washout/washin; higher MV contributes some mixing
+  var tauMin=CIRCUIT_VOL / (fgf + mv*0.12);
+  var tauSec=tauMin*60;
+  sevoActual+=(sevoDial-sevoActual)*(dt/Math.max(1,tauSec));
+  sevoActual=Math.max(0,Math.min(8,sevoActual));
+  // Update FiO2 from gas mix (O2 fraction of fresh gas)
+  var newFio2=Math.round(o2Flow/fgf*100);
+  newFio2=Math.max(21,Math.min(100,newFio2));
+  if(newFio2!==VS.fio2){VS.fio2=newFio2;}
+}
+
+// ── WAVEFORM GENERATORS ───────────────────────────────────────────────────────
+function isSpontMode(){var m=VS.ventMode||'VCV';return m==='PSV'||m==='SIMV'||m==='Manual';}
+
+function getWav(phase){
+  var mode=VS.ventMode||'VCV', path=VS.ventPath||'normal';
+  var peep=VS.peep||5, ie=VS.ie||2.0;
+  var pip=calcPIP(), pplat=calcPplat(), tv=VS.tv||450;
+  var ps=(VS.ps||10), pcL=(VS.pcLevel||15), flow=VS.flowRate||40;
+  var res=VS.resistance||5, comp=(VS.compliance||50);
+  var TiF=1/(1+ie);
+  var insp=phase<TiF;
+  var t=insp?(phase/TiF):((phase-TiF)/(1-TiF));
+  // tau for exp decay: higher resistance → slower
+  var tau=(path==='bronchospasm'||path==='mucus_plug')?0.65:(path==='laryngospasm')?0.25:2.4;
+  var P=peep,F=0,V=0,trigger=false;
+
+  if(path==='disconnect')return{P:0,F:0,V:0,trigger:false};
+  if(path==='apnea')return{P:peep,F:0,V:0,trigger:false};
+  if(path==='laryngospasm')return{P:peep+4*Math.sin(phase*Math.PI*6)-2,F:0,V:0,trigger:false};
+
+  // ── VCV: Volume Control ─────────────────────────────────────────────────────
+  // Flow:    SQUARE (constant during insp)
+  // Volume:  LINEAR RAMP (= constant flow × time)
+  // Pressure: Resistive STEP at start + LINEAR RISE to PIP
+  //           P(t) = PEEP + (PIP-Pplat) + (Pplat-PEEP)×t
+  //           where (PIP-Pplat) = resistive component, rises linearly as volume accumulates
+  //           Short "sharp" ramp at very start to model the step, then exp decay during exp
+  if(mode==='VCV'){
+    if(insp){
+      // Resistive step: PIP-Pplat above PEEP at t=0, climbing to PIP at t=1
+      var Presistive=Math.max(0,pip-pplat);
+      var Pelastic=pplat-peep;
+      if(t<0.04){
+        // Very brief initial step up (resistive component appearing instantly)
+        P=peep+Presistive*ss(t/0.04);
+      } else {
+        // Linear rise of elastic component
+        P=peep+Presistive+Pelastic*(t-0.04)/0.96;
+      }
+      F=flow;                   // SQUARE flow
+      V=tv*t;                   // LINEAR ramp volume
+    }else{
+      // Expiration: pressure decays from Pplat (resistive gone, elastic remaining)
+      P=peep+(pplat-peep)*Math.exp(-t*tau);
+      F=-flow*0.85*Math.exp(-t*tau);
+      V=tv*Math.exp(-t*tau);
+    }
+
+  // ── PCV: Pressure Control ───────────────────────────────────────────────────
+  // Pressure: SQUARE — rises rapidly to PC level above PEEP, held constant
+  // Flow:     DECELERATING exponential — high at start (large ΔP), falls as lung fills
+  // Volume:   EXPONENTIAL RISE — mirrors integral of decelerating flow
+  }else if(mode==='PCV'){
+    var pcTarget=peep+pcL;       // absolute target pressure
+    var rF=Math.max(0.04,(VS.riseTime||25)/100*0.4); // rise time (shorter than PSV)
+    // tau_insp for PCV: determines how fast flow decelerates
+    var tauInsp=comp*res/1000*1.5;
+    tauInsp=Math.max(0.08,Math.min(0.60,tauInsp));
+    if(insp){
+      if(t<rF){
+        P=peep+(pcTarget-peep)*ss(t/rF); // quick rise
+        F=flow*ss(t/rF);
+        V=tv*0.1*ss(t/rF);
+      } else {
+        P=pcTarget;              // FLAT — held constant at set pressure
+        // Flow decelerates exponentially from peak as lung fills back-pressure grows
+        var t2=(t-rF)/(1-rF);
+        var Fpeak=flow*1.4;
+        F=Fpeak*Math.exp(-t2/tauInsp);
+        // Volume = integral of decelerating flow = TV*(1-exp)
+        V=tv*(1-Math.exp(-t2/tauInsp));
+      }
+    }else{
+      P=peep+(pcTarget-peep)*Math.exp(-t*tau);
+      F=-flow*0.9*Math.exp(-t*tau);
+      V=tv*Math.exp(-t*tau);
+    }
+
+  // ── Spontaneous modes (PSV, SIMV, Manual+RR, triggered) ────────────────────
+  }else{
+    var hasSpontRR=hiddenRR>0;  // driven by instructor-set hidden patient RR
+    var doSpont=(mode==='PSV')||(mode==='SIMV')||
+                (mode==='Manual'&&hasSpontRR)||spontPending;
+
+    if(doSpont){
+      if(mode==='Manual'||spontPending){
+        // ── Pure spontaneous breathing: NO positive pressure support ──────────
+        // Inspiration: smooth negative pressure (patient muscular effort against circuit)
+        // sinusoidal flow, volume rises then falls
+        // NO trigger dip needed — these ARE the trigger, the whole breath is patient-driven
+        var tidV=tv*0.65; // ~65% of set TV for unassisted tidal breathing
+        if(insp){
+          // Pressure dips gently negative as patient inhales — magnitude depends on effort
+          P=peep - 2.5*Math.sin(t*Math.PI);       // smooth sinusoidal dip, peak ~2.5 below PEEP
+          F=flow*0.55*Math.sin(t*Math.PI);         // sinusoidal inspiratory flow
+          V=tidV*(1-Math.cos(t*Math.PI))*0.5;      // volume builds as integral of flow
+          trigger=(t<0.08);                         // brief flash at very start of effort
+        }else{
+          // Passive expiration — pressure returns to PEEP, gentle exp decay
+          P=peep + 0.5*Math.exp(-t*6);             // tiny positive from elastic recoil
+          F=-flow*0.45*Math.exp(-t*2.2);           // passive exp flow
+          V=tidV*(0.5+0.5*Math.cos(t*Math.PI));   // volume falls back to zero
+        }
+      }else{
+        // PSV / SIMV: patient triggers, vent delivers pressure support
+        var TRIG=0.06;
+        if(insp){
+          if(t<TRIG){
+            var td=t/TRIG;
+            P=peep-1.8*Math.sin(td*Math.PI);
+            F=0; V=0; trigger=true;
+          }else{
+            var t2=(t-TRIG)/(1-TRIG);
+            var psT=ps+peep;
+            var rF=Math.max(0.05,(VS.riseTime||25)/100);
+            if(t2<rF) P=peep+(psT-peep)*ss(t2/rF);
+            else P=psT*(1-0.04*((t2-rF)/(1-rF)));
+            F=flow*(1-ss(t2*1.4))+flow*0.05;
+            V=tv*(1-Math.exp(-t2*3.2));
+          }
+        }else{
+          P=peep+(ps*0.10)*Math.exp(-t*7);
+          F=-flow*0.5*Math.exp(-t*2.5);
+          V=tv*Math.exp(-t*3.0);
+        }
+      }
+    }else if(mode==='Manual'){
+      // Manual, no spontaneous RR: flat unless squeeze
+      if(manualPending&&insp){
+        var apl=VS.apl||30;
+        P=peep+apl*ss(t<0.35?t/0.35:(1-(t-0.35)/0.65));
+        F=flow*ss(t<0.4?t/0.4:(1-(t-0.4)/0.6));
+        V=tv*0.9*ss(t<0.55?t/0.55:1);
+      }else{P=peep;F=0;V=0;}
+    }
+  }
+
+  return{
+    P:Math.max(-5,Math.min(120,P)),
+    F:Math.max(-100,Math.min(100,F)),
+    V:Math.max(0,Math.min(tv*1.8,V)),
+    trigger:trigger
+  };
+}
+
+// CO2 capnogram
+// In spontaneous modes (PSV/SIMV/Manual): uses co2phase driven by VS.rr
+// In VCV: uses the mechanical breath phase directly
+function getCO2(phase){
+  var path=VS.ventPath||'normal';
+  var noCirc=(VS.rhythm==='VFib'||VS.rhythm==='Asystole'||VS.rhythm==='PEA');
+  if(noCirc||!VS.etco2On||path==='disconnect'||path==='apnea'||path==='laryngospasm')return 0;
+  // Spontaneous mode: CO2 flat if no patient breaths
+  if(isSpontMode()&&hiddenRR===0&&!spontPending)return 0;
+  var ie=VS.ie||2.0, TiF=1/(1+ie);
+  if(phase<TiF)return 0;   // inspiration — flat baseline
+  var t=(phase-TiF)/(1-TiF);
+  var n=(VS.etco2||35)/40;
+  if(path==='air_embolism')n*=0.18;
+  if(path==='bronchospasm'||path==='mucus_plug'){
+    if(t<0.12)return n*0.3*ss(t/0.12);
+    if(t<0.88){var s=(t-0.12)/0.76;return n*(0.3+1.4*s);}
+    return n*1.7*(1-ss((t-0.88)/0.12));
+  }
+  if(t<0.22)return n*ss(t/0.22);
+  if(t<0.72)return n*(1+0.07*(t-0.22)/0.50);
+  return n*1.07*(1-ss((t-0.72)/0.28));
+}
+
+// ── CANVAS SETUP ──────────────────────────────────────────────────────────────
+var cP=document.getElementById('c-p'),xP=cP.getContext('2d');
+var cF=document.getElementById('c-f'),xF=cF.getContext('2d');
+var cV=document.getElementById('c-v'),xV=cV.getContext('2d');
+var cC=document.getElementById('c-c'),xC=cC.getContext('2d');
+var lP=-1,lF=-1,lV=-1,lC=-1;
+
+function rsz(c,x){
+  var r=c.parentElement.getBoundingClientRect(),w=Math.round(r.width),h=Math.round(r.height);
+  if(w>0&&h>0&&(c.width!==w||c.height!==h)){c.width=w;c.height=h;x.fillStyle='#000';x.fillRect(0,0,w,h);}
+}
+function resizeAll(){rsz(cP,xP);rsz(cF,xF);rsz(cV,xV);rsz(cC,xC);lP=lF=lV=lC=-1;updateRefLines();}
+window.addEventListener('resize',resizeAll);
+
+function sdr(cv,cx,col,nY,pY){
+  var W=cv.width,H=cv.height;if(W<2||H<2)return;
+  cx.drawImage(cv,-1,0);
+  cx.fillStyle='#000';cx.fillRect(W-2,0,2,H);
+  cx.strokeStyle=col;cx.lineWidth=2;cx.lineCap='round';
+  cx.shadowColor=col;cx.shadowBlur=5;
+  cx.beginPath();cx.moveTo(W-2,pY<0?nY:pY);cx.lineTo(W-1,nY);cx.stroke();
+  cx.shadowBlur=0;
+}
+
+function pYf(p,H){return Math.max(2,Math.min(H-2,Math.round(H*0.92-(p/75)*H*0.87)));}
+function fYf(f,H){return Math.max(2,Math.min(H-2,Math.round(H*0.50-(f/100)*H*0.46)));}
+function vYf(v,H){var mx=Math.max(600,(VS.tv||450)*2.2);return Math.max(2,Math.min(H-2,Math.round(H*0.92-(v/mx)*H*0.87)));}
+function cYf(c,H){return Math.max(2,Math.min(H-2,Math.round(H*0.92-c*H*0.82)));}
+
+function updateRefLines(){
+  var peep=VS.peep||5,plim=VS.pipLimit||40;
+  document.getElementById('rl-peep').style.top=((0.92-(peep/75)*0.87)*100).toFixed(1)+'%';
+  document.getElementById('rl-plim').style.top=((0.92-(plim/75)*0.87)*100).toFixed(1)+'%';
+}
+
+// ── ANIMATION LOOP ─────────────────────────────────────────────────────────────
+var lt=null, vphase=0, co2phase=0, VPS=50;
+
+function frame(ts){
+  requestAnimationFrame(frame);
+  if(lt===null){lt=ts;return;}
+  var dt=Math.min((ts-lt)/1000,0.05);lt=ts;
+  var np=Math.max(1,Math.round(VPS*dt));
+
+  // Mechanical breath rate: Manual+spontaneous uses hiddenRR, others use set RR
+  var mode=VS.ventMode||'VCV';
+  var hasSpontRR=hiddenRR>0;
+  var manualSpont=(mode==='Manual'&&hasSpontRR);
+  // bLen: cycle length in seconds
+  var rr_mech=Math.max(1, manualSpont?hiddenRR:(VS.rr_set||14));
+  var bLen=60/rr_mech;
+
+  // CO2 rate: use patient's actual RR in any mode where they're breathing
+  var rr_co2;
+  if(mode==='VCV'||mode==='PCV') rr_co2=rr_mech;    // fully machine-controlled
+  else if(hasSpontRR) rr_co2=hiddenRR;               // patient RR set
+  else if(spontPending) rr_co2=rr_mech;              // single triggered breath
+  else rr_co2=0;                                      // apneic
+  var co2Active=(rr_co2>0);
+  var co2bLen=co2Active?60/Math.max(1,rr_co2):999999;
+
+  var spx=dt/np;
+  var HP=cP.height,HF=cF.height,HV=cV.height,HC=cC.height;
+  if(!cP.width){return;}
+
+  // Sevo washout — update once per frame (not per pixel)
+  updateSevo(dt);
+  updateSevoUI();
+
+  for(var i=0;i<np;i++){
+    vphase+=spx/bLen;
+    if(vphase>=1){
+      vphase-=1;
+      if(mode==='Manual'&&manualPending)manualPending=false;
+      if(spontPending)spontPending=false; // single triggered breath complete
+    }
+
+    // CO2 phase: spont modes use actual patient RR; VCV locked to mechanical
+    if(co2Active){
+      co2phase+=spx/co2bLen;
+      if(co2phase>=1)co2phase-=1;
+    } else {
+      co2phase=0;
+    }
+
+    var w=getWav(vphase);
+    var isVCV=(mode==='VCV'||mode==='PCV');
+    var co2=getCO2(isVCV?vphase:co2phase);
+
+    // Pressure trace: white flash during negative trigger inflection, green otherwise
+    // Flow and Volume: same green as pressure. CO2: monitor yellow always.
+    var presCol=w.trigger?'#ffffff':'#00e676';
+
+    var yP=pYf(w.P,HP),yF=fYf(w.F,HF),yV=vYf(w.V,HV),yC=cYf(co2,HC);
+    sdr(cP,xP,presCol,yP,lP);lP=yP;
+    sdr(cF,xF,'#00e676',yF,lF);lF=yF;
+    sdr(cV,xV,'#00e676',yV,lV);lV=yV;
+    sdr(cC,xC,'#ffd740',yC,lC);lC=yC;
+  }
+}
+
+// ── UI UPDATES ─────────────────────────────────────────────────────────────────
+var pathNames={
+  normal:'NORMAL',bronchospasm:'⚠ BRONCHOSPASM',ards:'⚠ ARDS',
+  mainstem:'⚠ MAINSTEM',mucus_plug:'⚠ MUCUS PLUG',
+  air_embolism:'⚠ AIR EMBOLISM',pneumothorax:'⚠ PNEUMOTHORAX',
+  laryngospasm:'⚠ LARYNGOSPASM',apnea:'⚠ APNEA',disconnect:'🔴 DISCONNECT',
+  pulm_edema:'⚠ PULM EDEMA',co2_absorber:'⚠ CO₂ ABSORBER'
+};
+
+function updateUI(){
+  var path=VS.ventPath||'normal',mode=VS.ventMode||'VCV';
+  var dc=(path==='disconnect');
+  var pip=dc?'--':calcPIP(),pplat=dc?'--':calcPplat(),mv=dc?'--':calcMV();
+  var noCirc=(VS.rhythm==='VFib'||VS.rhythm==='Asystole'||VS.rhythm==='PEA');
+  var spont=isSpontMode();
+  var etco2disp=(noCirc||!VS.etco2On||(spont&&hiddenRR===0&&!spontPending))?'--':(VS.etco2||35);
+
+  // Right panel numerics — aligned to waveforms
+  document.getElementById('nv-pip').textContent=dc?'--':(typeof pip==='number'?pip:'--');
+  document.getElementById('nv-pep').textContent=VS.peep||5;
+  document.getElementById('nv-mv').textContent=dc?'--':mv;
+  // TV: show actual (large) and set (small sub-label)
+  var setTV=VS.tv||450, actTV=calcActualTV();
+  var tvDiscrepant=Math.abs(actTV-setTV)>20;
+  document.getElementById('nv-tv').textContent=dc?'--':actTV;
+  document.getElementById('nv-tv').style.color=tvDiscrepant?'#ffaa00':'#00cfff';
+  document.getElementById('nv-tv-set').textContent=dc?'--':setTV;
+  document.getElementById('nb-tv').classList.toggle('al', tvDiscrepant && !dc);
+  document.getElementById('nv-co2').textContent=etco2disp;
+  // Corner
+  document.getElementById('nv-rr').textContent=spont?hiddenRR:(VS.rr_set||14);
+  document.getElementById('nv-ie').textContent='1:'+(VS.ie||2.0).toFixed(1);
+
+  // Wave overlays
+  document.getElementById('pi-nfo').textContent='PIP '+(dc?'--':pip)+' | PEEP '+(VS.peep||5);
+  document.getElementById('vl-nfo').textContent=dc?'TV -- mL':'TV act '+calcActualTV()+' mL';
+  document.getElementById('co-nfo').textContent=etco2disp==='--'?'-- mmHg':etco2disp+' mmHg';
+
+  // Settings bar values
+  document.getElementById('sv-tv').textContent=(VS.tv||450)+' mL';
+  document.getElementById('sv-rr').textContent=(VS.rr_set||14)+'/min';
+  document.getElementById('sv-peep').textContent=(VS.peep||5);
+  document.getElementById('sv-ps').textContent=(VS.ps||10);
+  document.getElementById('sv-pcl').textContent=(VS.pcLevel||15);
+  document.getElementById('sv-ie').textContent='1:'+(VS.ie||2.0).toFixed(1);
+  document.getElementById('sv-apl').textContent=(VS.apl||30);
+  document.getElementById('sv-plim').textContent=(VS.pipLimit||40);
+
+  // Mode buttons
+  ['VCV','PCV','PSV','SIMV','Manual'].forEach(function(m){
+    document.getElementById('mb-'+m).classList.toggle('on',mode===m);
+  });
+  document.getElementById('pc-ps').style.opacity=(mode==='PSV'||mode==='SIMV')?'1':'0.25';
+  document.getElementById('pc-pcl').style.opacity=(mode==='PCV')?'1':'0.25';
+  document.getElementById('pc-apl').style.opacity=(mode==='Manual')?'1':'0.25';
+  document.getElementById('mbtn').style.display=(mode==='Manual')?'block':'none';
+
+  // Path tag
+  var ptag=document.getElementById('ptag');
+  ptag.textContent=pathNames[path]||'NORMAL';
+  ptag.className=(path&&path!=='normal')?'bad':'';
+
+  // Alarm highlights
+  var pipNum=typeof pip==='number'?pip:0;
+  document.getElementById('nb-pip').classList.toggle('al',pipNum>(VS.pipLimit||40));
+  document.getElementById('nb-co2').classList.toggle('al',(VS.etco2||0)>55&&VS.etco2On&&!noCirc);
+
+  updateRefLines();
+  checkAlarms(pip,pplat);
+  // Broadcast actual values to monitor so it can show them
+  send({type:'ventActual', data:{
+    actualTV: dc?0:calcActualTV(),
+    pip: dc?0:(typeof pip==='number'?pip:0),
+    pplat: dc?0:(typeof pplat==='number'?pplat:0),
+    mv: dc?0:parseFloat(calcMV()||0),
+    ventMode: mode,
+    ventPath: path
+  }});
+}
+
+function updateSevoUI(){
+  var fgf=o2Flow+airFlow;
+  var fio2=fgf>0?Math.round(o2Flow/fgf*100):21;
+  document.getElementById('sv-o2').textContent=o2Flow.toFixed(1)+' L';
+  document.getElementById('sv-air').textContent=airFlow.toFixed(1)+' L';
+  document.getElementById('sv-fgfio2').textContent=fio2+'%';
+  document.getElementById('sv-fgf').textContent='FGF '+fgf.toFixed(1)+' L/min';
+  document.getElementById('sv-sevo-dial').textContent=sevoDial.toFixed(1)+'%';
+  document.getElementById('sv-sevo-actual').textContent='↳ del: '+sevoActual.toFixed(1)+'%';
+  var mac=(sevoActual/SEVO_MAC).toFixed(2);
+  document.getElementById('sv-sevo-mac').textContent=mac+' MAC';
+  document.getElementById('sevo-wrap').classList.toggle('on',sevoActual>0.05);
+}
+
+function checkAlarms(pip,pplat){
+  var alarms=[],crit=false,warn=false;
+  var path=VS.ventPath||'normal';
+  var noCirc=(VS.rhythm==='VFib'||VS.rhythm==='Asystole'||VS.rhythm==='PEA');
+  var pipNum=typeof pip==='number'?pip:0;
+  if(path==='disconnect'){alarms.push('CIRCUIT DISCONNECT');crit=true;}
+  if(path==='apnea'){alarms.push('APNEA — NO BREATHS');crit=true;}
+  if(path==='laryngospasm'){alarms.push('AIRWAY OBSTRUCTION');crit=true;}
+  if(pipNum>(VS.pipLimit||40)&&!crit){alarms.push('HIGH PRESSURE '+pipNum+' > LIMIT '+(VS.pipLimit||40));crit=true;}
+  if(VS.spo2<90&&VS.spo2>0&&!noCirc){alarms.push('SpO₂ LOW: '+VS.spo2+'%');crit=true;}
+  if((VS.etco2||0)>55&&VS.etco2On){alarms.push('HIGH EtCO₂ '+(VS.etco2)+' mmHg');warn=true;}
+  if((VS.fio2||50)<21){alarms.push('FiO₂ LOW: '+(VS.fio2||50)+'%');warn=true;}
+  if(typeof pplat==='number'&&pplat>28&&VS.ventMode!=='Manual'){alarms.push('Pplat HIGH: '+pplat+' cmH₂O');warn=true;}
+  if(path==='co2_absorber'){alarms.push('CO₂ ABSORBER EXHAUSTED');warn=true;}
+  var bar=document.getElementById('abar');
+  if(!alarms.length){bar.className='';document.getElementById('atxt').textContent='NO ACTIVE ALARMS';}
+  else{bar.className=crit?'crit':'warn';document.getElementById('atxt').textContent=alarms.join('  ·  ');}
+}
+
+// ── CONTROLS ──────────────────────────────────────────────────────────────────
+var adjL={tv:[50,1500,50],rr_set:[2,60,1],peep:[0,20,1],fio2:[21,100,5],
+          ps:[0,40,2],pipLimit:[15,70,2],apl:[5,70,5],riseTime:[5,80,5],pcLevel:[5,60,2]};
+function adj(key,delta){
+  var lim=adjL[key]||[0,999,1];
+  VS[key]=Math.round((Math.max(lim[0],Math.min(lim[1],(VS[key]||0)+delta)))*10)/10;
+  send({type:'update',data:(function(){var d={};d[key]=VS[key];return d;})()});
+  updateUI();
+}
+var ieSteps=[1.0,1.5,2.0,2.5,3.0,4.0];
+function adjIE(dir){
+  var idx=ieSteps.findIndex(function(v){return Math.abs(v-(VS.ie||2))<0.01;});
+  if(idx===-1)idx=2;
+  idx=Math.max(0,Math.min(ieSteps.length-1,idx+dir));
+  VS.ie=ieSteps[idx];
+  send({type:'update',data:{ie:VS.ie}});
+  updateUI();
+}
+function setMode(m){VS.ventMode=m;send({type:'update',data:{ventMode:m}});updateUI();}
+function doManualBreath(){
+  manualPending=true;vphase=0;
+  var btn=document.getElementById('mbtn');
+  btn.classList.add('fire');setTimeout(function(){btn.classList.remove('fire');},400);
+}
+
+// Gas mixer
+function adjGas(which,delta){
+  if(which==='o2'){o2Flow=Math.round(Math.max(0.2,Math.min(10,o2Flow+delta))*10)/10;}
+  else{airFlow=Math.round(Math.max(0,Math.min(10,airFlow+delta))*10)/10;}
+  // Push computed FiO2 to monitor
+  var fgf=Math.max(0.1,o2Flow+airFlow);
+  VS.fio2=Math.max(21,Math.min(100,Math.round(o2Flow/fgf*100)));
+  send({type:'update',data:{fio2:VS.fio2}});
+  updateSevoUI();
+  updateUI();
+}
+function adjSevo(delta){
+  sevoDial=Math.round(Math.max(0,Math.min(8,sevoDial+delta))*10)/10;
+  updateSevoUI();
+}
+
+// Boot
+resizeAll();
+updateUI();
+updateSevoUI();
+</script>
+</body>
+</html>
